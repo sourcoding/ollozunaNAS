@@ -113,3 +113,57 @@ func TestApplySMBGuestAndAuth(t *testing.T) {
 		t.Fatal("smbd/nmbd non avviati con share abilitate")
 	}
 }
+
+func TestApplySMBAdvancedFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	smbconf := filepath.Join(dir, "smb.conf")
+	os.WriteFile(smbconf, []byte("[global]\n"), 0o644)
+	r := &recRunner{}
+	m := NewManager(r, filepath.Join(dir, "exports"), smbconf)
+
+	cfg := `{"recycleBin":true,"smb":{"comment":"Docs","encryption":true,"timeMachine":true,"hideDotFiles":true,"caseSensitivity":"sensitive","oplocks":"disabled"}}`
+	sh := []Share{{
+		Name: "docs", Path: "/srv/docs", Protocol: SMB, ValidUsers: []string{"alice"},
+		Enabled: true, Config: []byte(cfg),
+	}}
+	if err := m.ApplySMB(context.Background(), sh); err != nil {
+		t.Fatalf("ApplySMB: %v", err)
+	}
+	got := readFile(t, filepath.Join(dir, "nasd-shares.conf"))
+	for _, want := range []string{
+		"comment = Docs", "smb encrypt = required", "hide dot files = yes",
+		"case sensitive = yes", "oplocks = no",
+		"vfs objects = recycle fruit", "recycle:repository = .recycle", "fruit:time machine = yes",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("smb.conf non contiene %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestApplyNFSRulesFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	exports := filepath.Join(dir, "exports")
+	r := &recRunner{}
+	m := NewManager(r, exports, filepath.Join(dir, "smb.conf"))
+
+	cfg := `{"rules":[{"client":"10.0.0.0/8","perm":"ro","adv":{"sync":false,"noSubtreeCheck":true,"secure":true,"allSquash":true,"anonuid":1000,"anongid":1000,"crossmnt":true}}]}`
+	sh := []Share{{Name: "data", Path: "/srv/data", Protocol: NFS, Enabled: true, Config: []byte(cfg)}}
+	if err := m.ApplyNFS(context.Background(), sh); err != nil {
+		t.Fatalf("ApplyNFS: %v", err)
+	}
+	got := readFile(t, exports)
+	want := `"/srv/data" 10.0.0.0/8(ro,async,no_subtree_check,secure,all_squash,crossmnt,anonuid=1000,anongid=1000)`
+	if !strings.Contains(got, want) {
+		t.Fatalf("exports non contiene la riga attesa:\nwant %s\ngot  %s", want, got)
+	}
+}
+
+func readFile(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read %s: %v", p, err)
+	}
+	return string(b)
+}

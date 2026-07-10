@@ -5,6 +5,7 @@ package shares
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,6 +31,122 @@ type Share struct {
 	AllowedIPs []string `json:"allowed_ips"` // NFS: host/reti autorizzati
 	ValidUsers []string `json:"valid_users"` // SMB: utenti/gruppi (@group)
 	Enabled    bool     `json:"enabled"`
+	// Config è la configurazione avanzata (opzioni SMB/NFS) prodotta dalla UI,
+	// conservata come blob JSON e riapplicata. Round-trip completo: tutto ciò che
+	// l'utente imposta viene salvato e riletto senza perdite.
+	Config json.RawMessage `json:"config,omitempty"`
+}
+
+// ShareConfig è la vista tipizzata (parziale) del blob Config usata dai
+// generatori di config. Rispecchia la forma inviata dal frontend.
+type ShareConfig struct {
+	RecycleBin bool        `json:"recycleBin"`
+	SMB        SMBOptions  `json:"smb"`
+	Rules      []NFSRule   `json:"rules"`
+	Versions   NFSVersions `json:"versions"`
+}
+
+// SMBOptions raccoglie le opzioni per-share applicabili a Samba.
+type SMBOptions struct {
+	MinProtocol     string `json:"minProtocol"`
+	Signing         bool   `json:"signing"`
+	Encryption      bool   `json:"encryption"`
+	TimeMachine     bool   `json:"timeMachine"`
+	Guest           bool   `json:"guest"`
+	Oplocks         string `json:"oplocks"`
+	HideDotFiles    bool   `json:"hideDotFiles"`
+	CaseSensitivity string `json:"caseSensitivity"`
+	Comment         string `json:"comment"`
+}
+
+// NFSRule è una regola client per una export NFS, con opzioni avanzate.
+type NFSRule struct {
+	Client string `json:"client"`
+	Perm   string `json:"perm"`
+	Adv    NFSAdv `json:"adv"`
+}
+
+type NFSAdv struct {
+	Sync           bool `json:"sync"`
+	NoRootSquash   bool `json:"noRootSquash"`
+	RootSquash     bool `json:"rootSquash"`
+	AllSquash      bool `json:"allSquash"`
+	Anonuid        int  `json:"anonuid"`
+	Anongid        int  `json:"anongid"`
+	NoSubtreeCheck bool `json:"noSubtreeCheck"`
+	Secure         bool `json:"secure"`
+	Crossmnt       bool `json:"crossmnt"`
+}
+
+type NFSVersions struct {
+	V3  bool `json:"v3"`
+	V4  bool `json:"v4"`
+	V41 bool `json:"v41"`
+	V42 bool `json:"v42"`
+}
+
+// parseConfig decodifica il blob Config; ritorna una struct vuota se assente o
+// malformato (retrocompatibile con le share salvate prima di questa feature).
+func (s Share) parseConfig() ShareConfig {
+	var c ShareConfig
+	if len(s.Config) > 0 {
+		_ = json.Unmarshal(s.Config, &c)
+	}
+	return c
+}
+
+// nfsRuleOpts costruisce la stringa di opzioni exports per una regola NFS.
+func nfsRuleOpts(r NFSRule) string {
+	o := make([]string, 0, 8)
+	if r.Perm == "ro" {
+		o = append(o, "ro")
+	} else {
+		o = append(o, "rw")
+	}
+	if r.Adv.Sync {
+		o = append(o, "sync")
+	} else {
+		o = append(o, "async")
+	}
+	if r.Adv.NoSubtreeCheck {
+		o = append(o, "no_subtree_check")
+	} else {
+		o = append(o, "subtree_check")
+	}
+	if r.Adv.Secure {
+		o = append(o, "secure")
+	} else {
+		o = append(o, "insecure")
+	}
+	switch {
+	case r.Adv.AllSquash:
+		o = append(o, "all_squash")
+	case r.Adv.NoRootSquash:
+		o = append(o, "no_root_squash")
+	default:
+		o = append(o, "root_squash")
+	}
+	if r.Adv.Crossmnt {
+		o = append(o, "crossmnt")
+	}
+	if r.Adv.Anonuid > 0 {
+		o = append(o, fmt.Sprintf("anonuid=%d", r.Adv.Anonuid))
+	}
+	if r.Adv.Anongid > 0 {
+		o = append(o, fmt.Sprintf("anongid=%d", r.Adv.Anongid))
+	}
+	return strings.Join(o, ",")
+}
+
+// confValue rende sicuro un valore testuale destinato a smb.conf: niente
+// newline (che romperebbero la sezione) o caratteri di controllo.
+func confValue(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 type Manager struct {
@@ -60,19 +177,38 @@ func (m *Manager) ApplyNFS(ctx context.Context, all []Share) error {
 		}
 		m.run.Run(ctx, "chmod", "0777", s.Path) //nolint:errcheck
 		enabled++
-		opts := "rw"
-		if s.ReadOnly {
-			opts = "ro"
-		}
-		hosts := s.AllowedIPs
-		if len(hosts) == 0 {
-			hosts = []string{"*"}
-		}
 		// Il formato exports supporta percorsi tra virgolette (gestisce spazi).
 		// Il controllo precedente ha già escluso newline e doppi apici.
 		b.WriteString(fmt.Sprintf("%q", s.Path))
-		for _, h := range hosts {
-			b.WriteString(fmt.Sprintf(" %s(%s,sync,no_subtree_check)", h, opts))
+		cfg := s.parseConfig()
+		if len(cfg.Rules) > 0 {
+			// Regole per-client con opzioni avanzate (rw/ro, squash, sync, ...).
+			for _, r := range cfg.Rules {
+				client := strings.TrimSpace(r.Client)
+				if client == "" {
+					client = "*"
+				}
+				if strings.ContainsAny(client, " \t\r\n\"()") {
+					return fmt.Errorf("client NFS non valido: %q", client)
+				}
+				b.WriteString(fmt.Sprintf(" %s(%s)", client, nfsRuleOpts(r)))
+			}
+		} else {
+			// Retrocompat: usa AllowedIPs + ReadOnly.
+			opts := "rw"
+			if s.ReadOnly {
+				opts = "ro"
+			}
+			hosts := s.AllowedIPs
+			if len(hosts) == 0 {
+				hosts = []string{"*"}
+			}
+			for _, h := range hosts {
+				if strings.ContainsAny(h, " \t\r\n\"()") {
+					return fmt.Errorf("client NFS non valido: %q", h)
+				}
+				b.WriteString(fmt.Sprintf(" %s(%s,sync,no_subtree_check)", h, opts))
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -123,6 +259,46 @@ func (m *Manager) ApplySMB(ctx context.Context, all []Share) error {
 			// Nessun utente indicato: share pubblica (guest). Richiede
 			// "map to guest = Bad User" in [global] (impostato in fase di build).
 			b.WriteString("   guest ok = yes\n")
+		}
+		// Opzioni avanzate SMB (per-share) dalla config della UI.
+		cfg := s.parseConfig()
+		if v := strings.TrimSpace(cfg.SMB.Comment); v != "" {
+			b.WriteString(fmt.Sprintf("   comment = %s\n", confValue(v)))
+		}
+		if cfg.SMB.HideDotFiles {
+			b.WriteString("   hide dot files = yes\n")
+		}
+		switch cfg.SMB.CaseSensitivity {
+		case "sensitive":
+			b.WriteString("   case sensitive = yes\n")
+		case "insensitive":
+			b.WriteString("   case sensitive = no\n")
+		}
+		if cfg.SMB.Oplocks == "disabled" {
+			b.WriteString("   oplocks = no\n")
+		}
+		if cfg.SMB.Encryption {
+			// Cifratura del trasporto SMB3 richiesta per questa share.
+			b.WriteString("   smb encrypt = required\n")
+		}
+		// vfs objects: recycle (cestino) e fruit (Time Machine / macOS).
+		var vfs []string
+		if cfg.RecycleBin {
+			vfs = append(vfs, "recycle")
+		}
+		if cfg.SMB.TimeMachine {
+			vfs = append(vfs, "fruit")
+		}
+		if len(vfs) > 0 {
+			b.WriteString("   vfs objects = " + strings.Join(vfs, " ") + "\n")
+			if cfg.RecycleBin {
+				b.WriteString("   recycle:repository = .recycle\n")
+				b.WriteString("   recycle:keeptree = yes\n")
+				b.WriteString("   recycle:versions = yes\n")
+			}
+			if cfg.SMB.TimeMachine {
+				b.WriteString("   fruit:time machine = yes\n")
+			}
 		}
 		b.WriteString("   create mask = 0664\n")
 		b.WriteString("   directory mask = 0775\n")

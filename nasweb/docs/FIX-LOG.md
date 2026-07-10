@@ -201,3 +201,25 @@ regole; i dischi dati interni SATA/NVMe vengono azzerati.
   - `NFSModal` — Export Path (share NFS).
   DLNA e wizard qBittorrent avevano già il browse (FolderPicker / QbtFolderPicker).
   Ogni bottone apre il picker e ne scrive il percorso assoluto nel campo.
+
+## Share: le modifiche avanzate non venivano salvate (SMB version, ecc.)
+- **Bug**: modificando una share (es. versione SMB) e salvando, l'impostazione non
+  veniva mantenuta. Causa: solo name/path/read_only/valid_users/allowed_ips/enabled
+  erano persistiti; tutte le opzioni avanzate della UI venivano scartate al save
+  (`mapCIFSToAPI`/`mapNFSToAPI` le omettevano), non c'era colonna DB, e in lettura
+  `mapShareFromAPI` fabbricava valori di default.
+- **Fix — persistenza round-trip**:
+  - DB: migrazione `0003_share_config.sql` → colonna `config TEXT` (blob JSON).
+  - Backend (`internal/shares`, `internal/api/handlers.go`): `Share.Config` salvata/riletta
+    (create/update/loadAll). Round-trip completo: tutto ciò che l'utente imposta è conservato.
+  - Frontend (`app.js`): `mapCIFSToAPI`/`mapNFSToAPI` inviano `config: form`;
+    `mapShareFromAPI` reidrata dal blob (fallback ai default per share vecchie).
+- **Fix — applicazione reale** delle opzioni (generazione config):
+  - SMB (`ApplySMB`): comment, hide dot files, case sensitive, oplocks, smb encrypt,
+    `vfs objects = recycle` (cestino), `fruit` + time machine.
+  - NFS (`ApplyNFS`): regole per-client con rw/ro, sync/async, subtree_check, secure,
+    root_squash/no_root_squash/all_squash, crossmnt, anonuid/anongid.
+  - Nota: la *versione SMB* (min protocol) e il *signing* sono parametri GLOBALI di
+    Samba (non per-share): ora vengono conservati/riletti nella UI ma non emessi nel
+    per-share include. Da valutare eventuale applicazione in [global] se richiesto.
+- Test: `shares_apply_test.go` (SMB avanzato + regole NFS da config); api round-trip.

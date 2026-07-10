@@ -515,10 +515,10 @@ func (h *sharesHandlers) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err := h.db.Exec(
-		`INSERT INTO shares(name, path, protocol, read_only, allowed_ips, valid_users, enabled)
-		 VALUES(?,?,?,?,?,?,?)`,
+		`INSERT INTO shares(name, path, protocol, read_only, allowed_ips, valid_users, enabled, config)
+		 VALUES(?,?,?,?,?,?,?,?)`,
 		req.Name, req.Path, string(req.Protocol), boolToInt(req.ReadOnly),
-		joinCSV(req.AllowedIPs), joinCSV(req.ValidUsers), boolToInt(req.Enabled),
+		joinCSV(req.AllowedIPs), joinCSV(req.ValidUsers), boolToInt(req.Enabled), configStr(req.Config),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -561,10 +561,10 @@ func (h *sharesHandlers) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := h.db.Exec(
-		`UPDATE shares SET name=?, path=?, protocol=?, read_only=?, allowed_ips=?, valid_users=?, enabled=?
+		`UPDATE shares SET name=?, path=?, protocol=?, read_only=?, allowed_ips=?, valid_users=?, enabled=?, config=?
 		 WHERE id=?`,
 		req.Name, req.Path, string(req.Protocol), boolToInt(req.ReadOnly),
-		joinCSV(req.AllowedIPs), joinCSV(req.ValidUsers), boolToInt(req.Enabled), id,
+		joinCSV(req.AllowedIPs), joinCSV(req.ValidUsers), boolToInt(req.Enabled), configStr(req.Config), id,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -632,7 +632,7 @@ func (h *sharesHandlers) reapply(ctx context.Context) error {
 
 func (h *sharesHandlers) loadAll() ([]shareDTO, error) {
 	rows, err := h.db.Query(
-		`SELECT id, name, path, protocol, read_only, allowed_ips, valid_users, enabled
+		`SELECT id, name, path, protocol, read_only, allowed_ips, valid_users, enabled, config
 		 FROM shares ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -642,9 +642,9 @@ func (h *sharesHandlers) loadAll() ([]shareDTO, error) {
 	out := []shareDTO{}
 	for rows.Next() {
 		var s shareDTO
-		var proto, ips, vusers string
+		var proto, ips, vusers, cfg string
 		var ro, en int
-		if err := rows.Scan(&s.ID, &s.Name, &s.Path, &proto, &ro, &ips, &vusers, &en); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Path, &proto, &ro, &ips, &vusers, &en, &cfg); err != nil {
 			return nil, err
 		}
 		s.Protocol = shares.Protocol(proto)
@@ -652,6 +652,9 @@ func (h *sharesHandlers) loadAll() ([]shareDTO, error) {
 		s.Enabled = en != 0
 		s.AllowedIPs = splitCSV(ips)
 		s.ValidUsers = splitCSV(vusers)
+		if cfg != "" {
+			s.Config = json.RawMessage(cfg)
+		}
 		out = append(out, s)
 	}
 	return out, rows.Err()
@@ -683,6 +686,15 @@ func splitCSV(s string) []string {
 }
 
 func joinCSV(xs []string) string { return strings.Join(xs, ",") }
+
+// configStr serializza il blob di configurazione avanzata della share per il DB
+// (stringa vuota se assente).
+func configStr(c json.RawMessage) string {
+	if len(c) == 0 {
+		return ""
+	}
+	return string(c)
+}
 
 func boolToInt(b bool) int {
 	if b {

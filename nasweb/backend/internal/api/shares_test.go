@@ -42,6 +42,7 @@ func setupSharesRouter(t *testing.T) (*chi.Mux, *sql.DB) {
 		read_only INTEGER NOT NULL DEFAULT 0,
 		allowed_ips TEXT DEFAULT '', valid_users TEXT DEFAULT '',
 		enabled INTEGER NOT NULL DEFAULT 1,
+		config TEXT NOT NULL DEFAULT '',
 		UNIQUE(name, protocol))`); err != nil {
 		t.Fatalf("create schema: %v", err)
 	}

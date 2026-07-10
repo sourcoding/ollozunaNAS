@@ -1687,6 +1687,16 @@ function fmtSize(gb) {
 
 function mapShareFromAPI(dto, ulist) {
   const vol = dto.path.match(/^\/mnt\/([^/]+)/)?.[1] || dto.path.split("/")[2] || "";
+  // Se la share ha una config salvata (blob completo), la usiamo come sorgente
+  // di verità: così TUTTE le impostazioni avanzate vengono rilette senza perdite.
+  // I campi autoritativi lato server (id/nome/percorso/stato) prevalgono.
+  if (dto.config && typeof dto.config === "object") {
+    return {
+      ...dto.config,
+      id:dto.id, name:dto.name, path:dto.path, volume:vol,
+      status:dto.enabled?"active":"disabled",
+    };
+  }
   const defaultAdv = { sync:true, noRootSquash:false, rootSquash:true, allSquash:false, anonuid:65534, anongid:65534, noSubtreeCheck:true, secure:true, crossmnt:false };
   if (dto.protocol === "smb") {
     const vu = (dto.valid_users||[]).filter(u=>!u.startsWith("@")).map(u=>{
@@ -1726,7 +1736,9 @@ function mapCIFSToAPI(form) {
       ...form.users.filter(u=>u.perm!=="none").map(u=>u.username),
       ...form.groups.filter(g=>g.perm!=="none").map(g=>"@"+g.name),
     ],
-    enabled: true,
+    enabled: form.status ? form.status==="active" : true,
+    // Config avanzata completa: viene salvata e riletta senza perdite.
+    config: form,
   };
 }
 
@@ -1736,7 +1748,9 @@ function mapNFSToAPI(form) {
     read_only: (form.rules||[]).length>0 && form.rules.every(r=>r.perm==="ro"),
     allowed_ips: (form.rules||[]).map(r=>r.client).filter(Boolean),
     valid_users: [],
-    enabled: true,
+    enabled: form.status ? form.status==="active" : true,
+    // Config avanzata completa (versioni, regole per-client, ...) round-trip.
+    config: form,
   };
 }
 
