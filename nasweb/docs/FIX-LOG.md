@@ -178,3 +178,15 @@ richiamato da `partman/early_command`) e reso sicuro sul disco di boot:
 Conservativo: nel dubbio NON cancella. Verificato con un mock sysfs che simula lo
 scenario Ventoy USB->SATA: il disco di boot (sda, USB) è protetto da entrambe le
 regole; i dischi dati interni SATA/NVMe vengono azzerati.
+
+## Menu di boot ISO: installer come default + timeout 5s
+- **Richiesta**: nel menu di boot iniziale dell'ISO, voce di default = installer,
+  con avvio automatico dopo 5 secondi.
+- **Fix** (`scripts/build-iso.sh`, hook binary `0200-bootmenu.hook.binary`): dopo
+  la generazione dei config bootloader, imposta:
+  - isolinux (BIOS): `timeout 50` (5s) + `ontimeout installstart`; sposta l'unico
+    `menu default` dalla voce Live a `installstart`.
+  - GRUB (UEFI): `set default='Start installer'`, `set timeout=5`, `timeout_style=menu`.
+- Logica verificata sui config reali estratti dall'ISO (senza rebuild): default e
+  timeout corretti su entrambi i bootloader. NB: modifica solo-ISO (non hot-deployabile
+  sulla VM) → effettiva alla prossima build (v0.1.1).

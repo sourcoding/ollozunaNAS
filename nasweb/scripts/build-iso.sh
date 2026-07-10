@@ -133,6 +133,41 @@ fi
 EOF
 chmod +x config/hooks/live/0100-nasd.hook.chroot
 
+# --- Hook binary: menu di boot con INSTALLER come default + timeout 5s ---
+# Gira nello stage binary (dopo che live-build ha generato i config dei
+# bootloader). Rende l'installer la voce di default sia in isolinux (BIOS) sia in
+# GRUB (UEFI), con countdown di 5s prima dell'avvio automatico.
+cat > config/hooks/live/0200-bootmenu.hook.binary <<'EOF'
+#!/bin/sh
+set -e
+B=binary
+[ -d "$B/isolinux" ] || [ -d "$B/boot/grub" ] || B=.
+
+# isolinux (BIOS): timeout 5s (unità 1/10s) + boot dell'installer allo scadere.
+if [ -d "$B/isolinux" ]; then
+  sed -i 's/^timeout .*/timeout 50/' "$B/isolinux/isolinux.cfg"
+  if grep -q '^ontimeout ' "$B/isolinux/isolinux.cfg"; then
+    sed -i 's/^ontimeout .*/ontimeout installstart/' "$B/isolinux/isolinux.cfg"
+  else
+    echo 'ontimeout installstart' >> "$B/isolinux/isolinux.cfg"
+  fi
+  # Voce evidenziata di default = installer (un solo "menu default").
+  sed -i '/^[[:space:]]*menu default[[:space:]]*$/d' "$B"/isolinux/*.cfg
+  sed -i '/^label installstart$/a menu default' "$B/isolinux/install.cfg"
+fi
+
+# GRUB (UEFI): default = "Start installer", countdown 5s con menu visibile.
+if [ -f "$B/boot/grub/config.cfg" ]; then
+  sed -i "s/^set default=.*/set default='Start installer'/" "$B/boot/grub/config.cfg"
+  if grep -q '^set timeout=' "$B/boot/grub/config.cfg"; then
+    sed -i 's/^set timeout=.*/set timeout=5/' "$B/boot/grub/config.cfg"
+  else
+    printf 'set timeout=5\nset timeout_style=menu\n' >> "$B/boot/grub/config.cfg"
+  fi
+fi
+EOF
+chmod +x config/hooks/live/0200-bootmenu.hook.binary
+
 # --- Preseed per l'installer (partiziona SOLO il disco di sistema; AD-6) ---
 # preseed.cfg e scrub-disks.sh finiscono nella root dell'initrd dell'installer:
 # il preseed richiama `sh /scrub-disks.sh` in partman/early_command.
