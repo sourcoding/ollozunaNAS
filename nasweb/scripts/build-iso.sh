@@ -126,8 +126,12 @@ EOF
 chmod +x config/hooks/live/0100-nasd.hook.chroot
 
 # --- Preseed per l'installer (partiziona SOLO il disco di sistema; AD-6) ---
+# preseed.cfg e scrub-disks.sh finiscono nella root dell'initrd dell'installer:
+# il preseed richiama `sh /scrub-disks.sh` in partman/early_command.
 mkdir -p config/includes.installer
 cp "$ROOT/scripts/preseed.cfg" config/includes.installer/preseed.cfg
+cp "$ROOT/scripts/scrub-disks.sh" config/includes.installer/scrub-disks.sh
+chmod +x config/includes.installer/scrub-disks.sh
 
 echo "==> Avvio build ISO (richiede root e diversi minuti)"
 lb build

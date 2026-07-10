@@ -167,3 +167,14 @@ riassemblare array orfani, es. /dev/md127):
   (testa e coda) su ogni disco fisso, rendendoli vergini. Evita che grub-installer
   si blocchi sui "raid orfani". Esclude il supporto d'installazione (/cdrom o live
   medium). Azione distruttiva, coerente con NAS che riconfigura lo storage da UI.
+
+### Scrub install: protezione del disco di boot (Ventoy USB->SATA)
+Lo scrub install è stato spostato in `scripts/scrub-disks.sh` (incluso nell'initrd,
+richiamato da `partman/early_command`) e reso sicuro sul disco di boot:
+- **esclude tutti i dischi sul bus USB** — incluso un SSD SATA su convertitore
+  USB->SATA con Ventoy a bordo (il supporto d'installazione dell'utente);
+- **esclude il disco che ospita il medium**, risolto attraverso loop/device-mapper
+  (es. `/dev/mapper/ventoy`) e partizioni fino al disco fisico.
+Conservativo: nel dubbio NON cancella. Verificato con un mock sysfs che simula lo
+scenario Ventoy USB->SATA: il disco di boot (sda, USB) è protetto da entrambe le
+regole; i dischi dati interni SATA/NVMe vengono azzerati.
