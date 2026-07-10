@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Costruisce un'ISO Debian minimal installabile con nasd preinstallato (via .deb).
+# Usa live-build. DA ESEGUIRE su Debian/Ubuntu con root e i pacchetti:
+#   sudo apt-get install live-build
+#   ./scripts/build.sh && ./scripts/build-deb.sh && ./scripts/build-apt-repo.sh
+#   sudo ./scripts/build-iso.sh
+#
+# Questo script prepara la configurazione live-build e lancia `lb build`.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORK="$ROOT/iso-build"
+DEB="$(ls -1 "$ROOT/deb-build"/nasd_*_amd64.deb 2>/dev/null | head -1 || true)"
+REPO="$ROOT/apt-repo"
+
+if [[ -z "$DEB" ]]; then
+  echo "Manca il .deb: esegui scripts/build.sh && scripts/build-deb.sh" >&2
+  exit 1
+fi
+
+# Il repo APT locale deve esistere ed essere indicizzato, altrimenti l'APT del
+# chroot fallisce molto più avanti con "file:/opt/nasd-repo/Packages not found".
+# Meglio fermarsi subito con un messaggio chiaro (era mascherato dal `|| true`).
+if [[ ! -f "$REPO/Packages" || ! -f "$REPO/Release" ]]; then
+  echo "Repo APT locale mancante o non indicizzato ($REPO/Packages assente):" >&2
+  echo "  esegui prima scripts/build-apt-repo.sh" >&2
+  exit 1
+fi
+
+rm -rf "$WORK"
+mkdir -p "$WORK"
+cd "$WORK"
+
+# --- Configurazione live-build: Debian stable minimal, amd64, ISO ibrida ---
+# --debian-installer live: include l'installer (per installare su disco).
+lb config \
+  --distribution stable \
+  --architectures amd64 \
+  --binary-images iso-hybrid \
+  --debian-installer live \
+  --debian-installer-gui false \
+  --archive-areas "main contrib non-free non-free-firmware" \
+  --memtest none \
+  --apt-recommends true
+
+# --- Pacchetti installati nel sistema (servizi orchestrati da nasd) ---
+mkdir -p config/package-lists
+cat > config/package-lists/nas.list.chroot <<'EOF'
+nasd
+mdadm
+samba
+smbclient
+cifs-utils
+nfs-kernel-server
+nfs-common
+smartmontools
+minidlna
+qbittorrent-nox
+acl
+nftables
+openssl
+util-linux
+e2fsprogs
+xfsprogs
+sudo
+ca-certificates
+openssh-server
+EOF
+
+# --- nasd .deb: copiato in config/packages.chroot/ → live-build lo installa
+#     direttamente senza bisogno di una sorgente APT separata. ---
+mkdir -p config/packages.chroot
+cp "$DEB" config/packages.chroot/
+
+# --- Repo incluso nel sistema installato (per reinstall/upgrade offline) ---
+mkdir -p config/includes.chroot/opt/nasd-repo
+cp "$REPO"/*.deb "$REPO"/Packages* "$REPO"/Release config/includes.chroot/opt/nasd-repo/
+[[ -f "$REPO/InRelease" ]] && cp "$REPO/InRelease" config/includes.chroot/opt/nasd-repo/ || true
+mkdir -p config/includes.chroot/etc/apt/sources.list.d
+cat > config/includes.chroot/etc/apt/sources.list.d/nasd.list <<'EOF'
+deb [trusted=yes] file:/opt/nasd-repo ./
+EOF
+
+# --- Branding minimale ---
+mkdir -p config/includes.chroot/etc
+echo "ollozunaos" > config/includes.chroot/etc/hostname
+cat > config/includes.chroot/etc/motd <<'EOF'
+
+  ollozunaOS — NAS Web Management Interface
+  UI: https://<ip>:8443   ·   crea admin: sudo nasctl create-admin -u admin -p '...'
+
+EOF
+
+# --- Hook: abilita i servizi nasd, disabilita di default quelli orchestrati ---
+mkdir -p config/hooks/live
+cat > config/hooks/live/0100-nasd.hook.chroot <<'EOF'
+#!/bin/sh
+set -e
+mkdir -p /var/lib/nasd /srv/nas
+systemctl enable nasd-firstboot.service nasd.service || true
+# I servizi di rete (samba/nfs/minidlna) li abilita nasd su richiesta.
+systemctl disable smbd nmbd nfs-server minidlna 2>/dev/null || true
+# Samba deve includere le share generate da nasd, altrimenti non le serve.
+touch /etc/samba/nasd-shares.conf
+if ! grep -q 'nasd-shares.conf' /etc/samba/smb.conf 2>/dev/null; then
+  printf '\n   include = /etc/samba/nasd-shares.conf\n' >> /etc/samba/smb.conf
+fi
+# Abilita il fallback guest per le share pubbliche (senza valid users).
+if ! grep -q 'map to guest' /etc/samba/smb.conf 2>/dev/null; then
+  sed -i '/^\[global\]/a\   map to guest = Bad User' /etc/samba/smb.conf
+fi
+# File exports iniziale (nasd lo rigenera a ogni modifica).
+touch /etc/exports
+EOF
+chmod +x config/hooks/live/0100-nasd.hook.chroot
+
+# --- Preseed per l'installer (partiziona SOLO il disco di sistema; AD-6) ---
+mkdir -p config/includes.installer
+cp "$ROOT/scripts/preseed.cfg" config/includes.installer/preseed.cfg
+
+echo "==> Avvio build ISO (richiede root e diversi minuti)"
+lb build
+
+echo "ISO generata in $WORK (live-image-amd64.hybrid.iso)"

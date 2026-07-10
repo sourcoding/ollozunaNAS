@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NAS Manager</title>
+  <link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body>
+  <div id="app">
+    <noscript>Questa interfaccia richiede JavaScript abilitato.</noscript>
+  </div>
+  <!-- Preact + HTM serviti localmente (no CDN: il NAS può essere offline).
+       L'import map risolve gli specifier "bare" usati da app.js verso i file
+       vendored in /assets/vendor (popolati da scripts/vendor-frontend.sh).
+       hooks.mjs importa "preact" come bare → la mappa garantisce un'unica
+       istanza condivisa di Preact. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "preact": "/assets/vendor/preact.mjs",
+      "preact/hooks": "/assets/vendor/hooks.mjs",
+      "htm": "/assets/vendor/htm.mjs"
+    }
+  }
+  </script>
+  <script type="module" src="/assets/js/app.js"></script>
+</body>
+</html>

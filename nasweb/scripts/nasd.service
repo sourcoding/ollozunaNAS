@@ -1,0 +1,28 @@
+[Unit]
+Description=NAS Web Management Interface (nasd)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/nasd -config /etc/nasd/config.yaml
+Restart=on-failure
+RestartSec=3
+
+# Il daemon necessita di privilegi per orchestrare mdadm/samba/useradd, ma
+# applichiamo comunque hardening per limitare la superficie d'attacco.
+# In un'installazione più granulare si possono spostare le operazioni
+# privilegiate in un helper separato (modello privilege separation).
+User=root
+NoNewPrivileges=false
+# ProtectSystem=true (non "full"): read-only /usr e /boot, /etc scrivibile
+# (nasd rigenera exports, minidlna.conf, samba). NB: NON usare ReadWritePaths
+# su singoli file (/etc/exports, /etc/minidlna.conf): systemd li bind-monta e
+# la scrittura atomica (file .tmp + rename) fallisce con EBUSY
+# ("device or resource busy"). Con ProtectSystem=true non serve comunque.
+ProtectSystem=true
+ProtectHome=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

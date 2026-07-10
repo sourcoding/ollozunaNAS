@@ -1,0 +1,25 @@
+# Configurazione nasd — copiare in /etc/nasd/config.yaml e adattare.
+
+server:
+  listen: ":8443"
+  # Per HTTPS indicare i certificati (consigliato in produzione).
+  # Generabili con lo script scripts/gen-cert.sh per uso interno.
+  tls_cert: "/etc/nasd/tls/cert.pem"
+  tls_key: "/etc/nasd/tls/key.pem"
+
+database:
+  path: "/var/lib/nasd/nasd.db"
+  migrations_dir: "/usr/share/nasd/migrations"
+
+security:
+  session_ttl: "8h"
+  bcrypt_cost: 12
+  csrf_enabled: true
+
+paths:
+  static_dir: "/usr/share/nasd/www"
+  samba_conf: "/etc/samba/smb.conf"
+  exports: "/etc/exports"
+  minidlna_conf: "/etc/minidlna.conf"
+  # Radice (jail) del file manager: tutte le operazioni sono confinate qui sotto.
+  files_root: "/srv"

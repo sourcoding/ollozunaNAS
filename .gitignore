@@ -1,0 +1,11 @@
+
+# Artefatti di build live-build (chroot enorme; rompe umount se git li scandisce)
+nasweb/iso-build/
+nasweb/deb-build/
+nasweb/apt-repo/
+# Output di scripts/build.sh: binari e www rigenerabili dal sorgente
+nasweb/dist/
+.claude
+graphify-out/
+# Immagini disco della VM di test (multi-GB): non vanno nel repo
+vm/disks/

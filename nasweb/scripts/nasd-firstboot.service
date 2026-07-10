@@ -1,0 +1,14 @@
+[Unit]
+Description=nasd first-boot provisioning (TLS cert, data dirs)
+After=network-online.target
+Wants=network-online.target
+Before=nasd.service
+ConditionPathExists=!/etc/nasd/tls/cert.pem
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/nasd-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
