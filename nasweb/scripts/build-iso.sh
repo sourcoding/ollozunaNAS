@@ -13,6 +13,14 @@ WORK="$ROOT/iso-build"
 DEB="$(ls -1 "$ROOT/deb-build"/nasd_*_amd64.deb 2>/dev/null | head -1 || true)"
 REPO="$ROOT/apt-repo"
 
+# --- Versione ISO: usa la corrente per QUESTA build, poi la incrementa (patch)
+# per la PROSSIMA. Il nome del file ISO include la versione (ollozunaOS-X.Y.Z.iso).
+VERSION_FILE="$ROOT/ISO_VERSION"
+[[ -f "$VERSION_FILE" ]] || echo "0.1.0" > "$VERSION_FILE"
+VERSION="$(tr -d ' \t\n\r' < "$VERSION_FILE")"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || VERSION="0.1.0"
+ISO_NAME="ollozunaOS-${VERSION}.iso"
+
 if [[ -z "$DEB" ]]; then
   echo "Manca il .deb: esegui scripts/build.sh && scripts/build-deb.sh" >&2
   exit 1
@@ -133,7 +141,18 @@ cp "$ROOT/scripts/preseed.cfg" config/includes.installer/preseed.cfg
 cp "$ROOT/scripts/scrub-disks.sh" config/includes.installer/scrub-disks.sh
 chmod +x config/includes.installer/scrub-disks.sh
 
-echo "==> Avvio build ISO (richiede root e diversi minuti)"
+echo "==> Avvio build ISO v${VERSION} (richiede root e diversi minuti)"
 lb build
 
-echo "ISO generata in $WORK (live-image-amd64.hybrid.iso)"
+# Rinomina l'output con la versione. Rimuoviamo il nome non versionato così
+# run-vm.sh (fallback: ISO più recente in iso-build/) prende sempre l'ultima.
+HYBRID="$WORK/live-image-amd64.hybrid.iso"
+if [[ -f "$HYBRID" ]]; then
+  mv -f "$HYBRID" "$WORK/$ISO_NAME"
+fi
+
+# Incrementa la patch per la PROSSIMA build (solo dopo un build riuscito).
+NEXT="$(echo "$VERSION" | awk -F. '{printf "%d.%d.%d", $1, $2, $3+1}')"
+echo "$NEXT" > "$VERSION_FILE"
+
+echo "ISO generata: $WORK/$ISO_NAME  (prossima build: v${NEXT})"
