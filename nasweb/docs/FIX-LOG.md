@@ -190,3 +190,14 @@ regole; i dischi dati interni SATA/NVMe vengono azzerati.
 - Logica verificata sui config reali estratti dall'ISO (senza rebuild): default e
   timeout corretti su entrambi i bootloader. NB: modifica solo-ISO (non hot-deployabile
   sulla VM) → effettiva alla prossima build (v0.1.1).
+
+## Browse button su tutti i campi path
+- **Richiesta**: ogni campo che contiene un percorso deve avere un bottone "Browse".
+- **Fix** (`frontend/src/js/app.js`): aggiunto il picker cartelle (`FolderPicker`,
+  root `/srv` = FilesRoot) accanto ai campi path che ne erano privi:
+  - `CreateFilesystemModal` — Mount Point;
+  - `MountExistingModal` — Mount Point;
+  - `CIFSModal` — Path (share SMB);
+  - `NFSModal` — Export Path (share NFS).
+  DLNA e wizard qBittorrent avevano già il browse (FolderPicker / QbtFolderPicker).
+  Ogni bottone apre il picker e ne scrive il percorso assoluto nel campo.

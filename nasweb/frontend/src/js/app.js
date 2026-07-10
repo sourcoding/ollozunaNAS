@@ -803,6 +803,7 @@ function CreateFilesystemModal({ fs, onClose, onDone, onErr }) {
   const [progress, setProgress] = useState(0);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState("");
+  const [picker, setPicker] = useState(false);
   useEscClose(onClose);
 
   const submit = async () => {
@@ -847,12 +848,17 @@ function CreateFilesystemModal({ fs, onClose, onDone, onErr }) {
               </select>
             </label>
             <label>Mount Point
-              <input value=${mountPoint} disabled=${formatting} placeholder="/srv/nas/md0"
-                onInput=${(e) => { setMountPoint(e.target.value); setErr(""); }}
-                style="display:block;width:100%;margin-top:6px;box-sizing:border-box" />
+              <div style="display:flex;gap:8px;margin-top:6px">
+                <input value=${mountPoint} disabled=${formatting} placeholder="/srv/nas/md0"
+                  onInput=${(e) => { setMountPoint(e.target.value); setErr(""); }}
+                  style="flex:1;box-sizing:border-box" />
+                <button type="button" class="action-btn" disabled=${formatting} onClick=${() => setPicker(true)}>📁 Browse</button>
+              </div>
               <span class="muted" style="font-size:11px">Directory will be created automatically</span>
             </label>
           </div>
+          ${picker && html`<${FolderPicker} onClose=${() => setPicker(false)}
+            onSelect=${(p) => { setMountPoint(p); setPicker(false); setErr(""); }} />`}
           ${formatting && html`
             <div class="smart-progress" style="margin-top:16px">
               <div class="smart-progress-label"><span>Formatting and mounting…</span><span>${progress}%</span></div>
@@ -875,6 +881,7 @@ function MountExistingModal({ fs, onClose, onDone, onErr }) {
   const [mountPoint, setMountPoint] = useState(defaultMount);
   const [mounting, setMounting] = useState(false);
   const [err, setErr] = useState("");
+  const [picker, setPicker] = useState(false);
   useEscClose(onClose);
 
   const submit = async () => {
@@ -895,11 +902,16 @@ function MountExistingModal({ fs, onClose, onDone, onErr }) {
         <div class="info-box"><span class="mono">${fs.device}</span><span class="muted"> · ${fs.fstype}</span></div>
         <div style="margin-top:14px">
           <label>Mount Point
-            <input value=${mountPoint} disabled=${mounting} placeholder="/srv/nas/md0"
-              onInput=${(e) => setMountPoint(e.target.value)}
-              style="display:block;width:100%;margin-top:6px;box-sizing:border-box" />
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <input value=${mountPoint} disabled=${mounting} placeholder="/srv/nas/md0"
+                onInput=${(e) => setMountPoint(e.target.value)}
+                style="flex:1;box-sizing:border-box" />
+              <button type="button" class="action-btn" disabled=${mounting} onClick=${() => setPicker(true)}>📁 Browse</button>
+            </div>
           </label>
         </div>
+        ${picker && html`<${FolderPicker} onClose=${() => setPicker(false)}
+          onSelect=${(p) => { setMountPoint(p); setPicker(false); }} />`}
         ${err && html`<p class="error">${err}</p>`}
         <div class="form-actions">
           <button class="link" onClick=${onClose}>Cancel</button>
@@ -1999,6 +2011,7 @@ function CIFSModal({ share, volumes, users, groups, onClose, onSave }) {
     users:[], groups:[], defaultPerm:"none",
   });
   const [errors, setErrors] = useState({});
+  const [picker, setPicker] = useState(false);
   useEscClose(onClose);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
   const setSMB = (k,v) => setForm(f=>({...f,smb:{...f.smb,[k]:v}}));
@@ -2058,11 +2071,16 @@ function CIFSModal({ share, volumes, users, groups, onClose, onSave }) {
             </select>
           </label>
           <label style="grid-column:1/-1">Path <span class="required">*</span>
-            <input value=${form.path} class=${errors.path?"input-error":""} placeholder="/mnt/md0/sharename"
-              onInput=${e=>{set("path",e.target.value);setErrors(x=>({...x,path:""}));}} />
+            <div style="display:flex;gap:8px">
+              <input value=${form.path} class=${errors.path?"input-error":""} placeholder="/srv/nas/md0/sharename" style="flex:1"
+                onInput=${e=>{set("path",e.target.value);setErrors(x=>({...x,path:""}));}} />
+              <button type="button" class="action-btn" onClick=${()=>setPicker(true)}>📁 Browse</button>
+            </div>
             ${errors.path&&html`<span class="field-error">${errors.path}</span>`}
           </label>
         </div>
+        ${picker&&html`<${FolderPicker} onClose=${()=>setPicker(false)}
+          onSelect=${p=>{set("path",p);setErrors(x=>({...x,path:""}));setPicker(false);}} />`}
         <div style="display:flex;gap:20px;margin-top:12px;flex-wrap:wrap">
           <${TogRow} label="Create folder if not exists" checked=${form.createFolder} onChange=${e=>set("createFolder",e.target.checked)} />
           <${TogRow} label="Enable Recycle Bin" hint="Deleted files go to .recycle inside the share" checked=${form.recycleBin} onChange=${e=>set("recycleBin",e.target.checked)} />
@@ -2264,6 +2282,7 @@ function NFSModal({ share, volumes, onClose, onSave }) {
     global:{ fsid:false, fsidNum:0, acl:false, pnfs:false, sec:"sys", description:"" },
   });
   const [errors, setErrors] = useState({});
+  const [picker, setPicker] = useState(false);
   useEscClose(onClose);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
   const setVer = (k,v) => setForm(f=>({...f,versions:{...f.versions,[k]:v}}));
@@ -2297,10 +2316,15 @@ function NFSModal({ share, volumes, onClose, onSave }) {
           </select></label>
           <label>Description<input value=${form.description} placeholder="Optional" onInput=${e=>set("description",e.target.value)} /></label>
           <label style="grid-column:1/-1">Export Path <span class="required">*</span>
-            <input value=${form.path} class=${errors.path?"input-error":""} placeholder="/mnt/md1/backup"
-              onInput=${e=>{set("path",e.target.value);setErrors(x=>({...x,path:""}));}} />
+            <div style="display:flex;gap:8px">
+              <input value=${form.path} class=${errors.path?"input-error":""} placeholder="/srv/nas/md0/backup" style="flex:1"
+                onInput=${e=>{set("path",e.target.value);setErrors(x=>({...x,path:""}));}} />
+              <button type="button" class="action-btn" onClick=${()=>setPicker(true)}>📁 Browse</button>
+            </div>
           </label>
         </div>
+        ${picker&&html`<${FolderPicker} onClose=${()=>setPicker(false)}
+          onSelect=${p=>{set("path",p);setErrors(x=>({...x,path:""}));setPicker(false);}} />`}
         <div style="display:flex;gap:20px;margin-top:10px;flex-wrap:wrap">
           <${TogRow} label="Create folder if not exists" checked=${form.createFolder} onChange=${e=>set("createFolder",e.target.checked)} />
           <${TogRow} label="Log access" checked=${form.logAccess} onChange=${e=>set("logAccess",e.target.checked)} />
