@@ -142,3 +142,28 @@ API create NFS+CIFS → 201; CIFS guest+auth `smbclient` put OK; NFS `showmount`
 - **Fix persistente** (`scripts/build-iso.sh`, hook chroot): imposta
   `GRUB_DISABLE_OS_PROBER=true` in `/etc/default/grub` così anche gli `update-grub`
   successivi (es. dopo aggiornamento kernel) restano veloci.
+
+## Create Filesystem btrfs — "mkfs.btrfs: executable file not found in $PATH"
+- **Causa**: la UI offre ext4/btrfs/xfs e il backend chiama il rispettivo `mkfs.*`,
+  ma l'immagine installava solo `e2fsprogs` (ext) e `xfsprogs` (xfs). Mancava
+  `btrfs-progs` → `mkfs.btrfs` non in $PATH → errore alla creazione del filesystem btrfs.
+- **Fix 1 (immagine)** `scripts/build-iso.sh`: aggiunto `btrfs-progs` alla package-list,
+  così ogni tipo filesystem offerto in UI ha il proprio mkfs preinstallato.
+- **Fix 2 (runtime, on-demand)** `internal/raid/raid.go` `ensureMkfs()`: prima di
+  `mkfs`, se il comando manca nasd installa il pacchetto corrispondente
+  (e2fsprogs/btrfs-progs/xfsprogs) via `systemd-run`+apt (fuori dalla sandbox
+  ProtectSystem). Idempotente. Così btrfs funziona anche su un sistema già installato
+  senza il pacchetto, senza reinstallare. Messaggio d'errore chiaro se manca la rete.
+
+## RAID orfani: "la config resta" dopo cancellazione / blocco GRUB in install
+Due facce dello stesso problema (superblock mdadm che sopravvivono e fanno
+riassemblare array orfani, es. /dev/md127):
+- **Cancellazione array dalla UI** (`internal/raid/raid.go` `Stop()`): oltre a
+  `mdadm --stop` ora rileva i dischi membri (`arrayMembers` via `mdadm --detail`,
+  PRIMA dello stop) e su ognuno esegue `mdadm --zero-superblock` + `wipefs -a` +
+  `partprobe`. Così l'array cancellato NON riappare al boot.
+- **Installazione da ISO** (`scripts/preseed.cfg`, `partman/early_command`): appena
+  prima del partizionamento ferma tutti gli array e azzera superblock + firme
+  (testa e coda) su ogni disco fisso, rendendoli vergini. Evita che grub-installer
+  si blocchi sui "raid orfani". Esclude il supporto d'installazione (/cdrom o live
+  medium). Azione distruttiva, coerente con NAS che riconfigura lo storage da UI.

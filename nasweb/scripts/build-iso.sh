@@ -62,6 +62,7 @@ openssl
 util-linux
 e2fsprogs
 xfsprogs
+btrfs-progs
 sudo
 ca-certificates
 openssh-server

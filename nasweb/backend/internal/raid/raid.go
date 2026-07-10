@@ -336,9 +336,48 @@ func (m *Manager) Stop(ctx context.Context, mdDevice string) error {
 		m.run.Run(ctx, "umount", mp) //nolint:errcheck
 		m.fstabRemove(mp)
 	}
+	// Rileva i dischi membri PRIMA dello stop: dopo `mdadm --stop` l'array non è
+	// più interrogabile e i membri non sarebbero più ricavabili.
+	members := m.arrayMembers(ctx, mdDevice)
 	m.mdadmConfRemove(mdDevice)
-	_, _, err := m.run.Run(ctx, "mdadm", "--stop", mdDevice)
-	return err
+	if _, _, err := m.run.Run(ctx, "mdadm", "--stop", mdDevice); err != nil {
+		return err
+	}
+	// Cancellare l'array NON basta: il superblock RAID resta scritto su ogni
+	// disco membro, quindi mdadm lo riassembla al boot (tipicamente come
+	// /dev/md127). Azzeriamo il superblock e cancelliamo tutte le firme residue
+	// (wipefs) su ogni membro, così la config non "riappare".
+	for _, d := range members {
+		m.run.Run(ctx, "mdadm", "--zero-superblock", d) //nolint:errcheck
+		m.run.Run(ctx, "wipefs", "-a", d)               //nolint:errcheck
+		m.run.Run(ctx, "partprobe", d)                  //nolint:errcheck
+	}
+	return nil
+}
+
+// arrayMembers restituisce i device membri (dischi o partizioni) di un array md,
+// letti da `mdadm --detail`. Va chiamato PRIMA dello stop dell'array.
+func (m *Manager) arrayMembers(ctx context.Context, mdDevice string) []string {
+	out, _, err := m.run.Run(ctx, "mdadm", "--detail", mdDevice)
+	if err != nil {
+		return nil
+	}
+	var devs []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		last := f[len(f)-1]
+		// Le righe della tabella membri terminano con il path del device
+		// (/dev/sdb, /dev/sda1, ...). Escludiamo il device md stesso.
+		if strings.HasPrefix(last, "/dev/") && last != mdDevice && !seen[last] {
+			seen[last] = true
+			devs = append(devs, last)
+		}
+	}
+	return devs
 }
 
 // mdadmConfRemove elimina le righe ARRAY di mdDevice da mdadm.conf, così un
@@ -440,6 +479,45 @@ var validFS = map[string]struct{ cmd, flag string }{
 	"xfs":   {"mkfs.xfs", "-f"},
 }
 
+// mkfsPkg mappa il tipo filesystem al pacchetto Debian che fornisce il suo mkfs.
+var mkfsPkg = map[string]string{
+	"ext4":  "e2fsprogs",
+	"ext3":  "e2fsprogs",
+	"btrfs": "btrfs-progs",
+	"xfs":   "xfsprogs",
+}
+
+// ensureMkfs garantisce che il comando mkfs richiesto sia disponibile; se manca
+// (es. btrfs-progs non preinstallato), installa il pacchetto corrispondente via
+// apt in un'unità transitoria — FUORI dalla sandbox di nasd, altrimenti
+// ProtectSystem=true renderebbe /usr read-only a dpkg. Idempotente: se il
+// comando c'è già, non fa nulla. Errore chiaro se l'installazione fallisce.
+func (m *Manager) ensureMkfs(ctx context.Context, cmd, fsType string) error {
+	has := func() bool {
+		_, _, err := m.run.Run(ctx, "sh", "-c", "command -v "+cmd+" >/dev/null 2>&1")
+		return err == nil
+	}
+	if has() {
+		return nil
+	}
+	pkg := mkfsPkg[fsType]
+	if pkg == "" {
+		return fmt.Errorf("%s non trovato e nessun pacchetto noto per il filesystem %s", cmd, fsType)
+	}
+	apt := func(script string) {
+		m.run.Run(ctx, "systemd-run", "--wait", "--collect", "--pipe", "--quiet", //nolint:errcheck
+			"--", "sh", "-c", "DEBIAN_FRONTEND=noninteractive "+script+" 2>&1")
+	}
+	apt("apt-get install -y --no-install-recommends " + pkg)
+	if !has() {
+		apt("apt-get update -y; apt-get install -y --no-install-recommends " + pkg)
+	}
+	if !has() {
+		return fmt.Errorf("%s non disponibile: installazione del pacchetto %s fallita (serve connessione di rete)", cmd, pkg)
+	}
+	return nil
+}
+
 // Format crea un filesystem sul device md. DISTRUTTIVO: cancella tutti i dati.
 func (m *Manager) Format(ctx context.Context, mdDevice, fsType string) error {
 	if !system.ValidMDDevice(mdDevice) {
@@ -448,6 +526,9 @@ func (m *Manager) Format(ctx context.Context, mdDevice, fsType string) error {
 	mc, ok := validFS[fsType]
 	if !ok {
 		return fmt.Errorf("filesystem non supportato: %s", fsType)
+	}
+	if err := m.ensureMkfs(ctx, mc.cmd, fsType); err != nil {
+		return err
 	}
 	_, _, err := m.run.Run(ctx, mc.cmd, mc.flag, mdDevice)
 	return err
@@ -529,6 +610,9 @@ func (m *Manager) CreateFilesystem(ctx context.Context, mdDevice, fsType, mountP
 	}
 	if !strings.HasPrefix(mountPoint, "/") || strings.ContainsAny(mountPoint, "\n\r\x00\"'`") {
 		return fmt.Errorf("mount point non valido: %s", mountPoint)
+	}
+	if err := m.ensureMkfs(ctx, mc.cmd, fsType); err != nil {
+		return err
 	}
 	if _, _, err := m.run.Run(ctx, mc.cmd, mc.flag, mdDevice); err != nil {
 		return fmt.Errorf("mkfs fallito: %w", err)
