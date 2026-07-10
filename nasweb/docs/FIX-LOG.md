@@ -132,3 +132,13 @@ API create NFS+CIFS → 201; CIFS guest+auth `smbclient` put OK; NFS `showmount`
 - Verificato sulla VM: logs (parse timestamp `+02:00`, filtro unit, 422 su unit invalida) e **reboot
   end-to-end** (VM caduta e riavviata). shutdown identico (`poweroff`), non triggerato per non dover
   riaccendere manualmente.
+
+## Installazione GRUB lenta (os-prober)
+- **Causa**: durante "installazione di GRUB" `os-prober` monta e scandisce ogni
+  partizione di ogni disco dati (RAID/storage) per cercare altri OS → molto lento
+  su un NAS con più dischi.
+- **Fix installer** (`scripts/preseed.cfg`): `d-i grub-installer/with_other_os boolean false`
+  salta os-prober durante l'install (sistema single-boot).
+- **Fix persistente** (`scripts/build-iso.sh`, hook chroot): imposta
+  `GRUB_DISABLE_OS_PROBER=true` in `/etc/default/grub` così anche gli `update-grub`
+  successivi (es. dopo aggiornamento kernel) restano veloci.

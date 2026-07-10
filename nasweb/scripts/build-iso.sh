@@ -111,6 +111,16 @@ if ! grep -q 'map to guest' /etc/samba/smb.conf 2>/dev/null; then
 fi
 # File exports iniziale (nasd lo rigenera a ogni modifica).
 touch /etc/exports
+# Disabilita os-prober anche nel sistema installato: senza questo, ogni
+# update-grub (es. dopo un aggiornamento kernel) tornerebbe a scandire tutti i
+# dischi dati, reintroducendo la lentezza. NAS = single-boot, non serve.
+if [ -f /etc/default/grub ]; then
+  if grep -q '^GRUB_DISABLE_OS_PROBER=' /etc/default/grub; then
+    sed -i 's/^GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=true/' /etc/default/grub
+  else
+    echo 'GRUB_DISABLE_OS_PROBER=true' >> /etc/default/grub
+  fi
+fi
 EOF
 chmod +x config/hooks/live/0100-nasd.hook.chroot
 
