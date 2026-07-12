@@ -159,6 +159,31 @@ func NewManager(run system.Runner, exportsPath, sambaConf string) *Manager {
 	return &Manager{run: run, exportsPath: exportsPath, sambaConf: sambaConf}
 }
 
+// GrantShareAccess rende il contenuto di una share raggiungibile e leggibile da
+// chi vi accede via SMB/NFS (che opera come utente NON proprietario, o guest).
+// Serve quando la cartella è di proprietà di un servizio con permessi ristretti
+// — tipicamente i download di qBittorrent (qbtuser:nas-media, mode 2770): senza
+// questo, riprodurre un file dalla share dà "access denied".
+//
+// Due passi, non distruttivi (aggiungono solo bit "other", non rimuovono nulla):
+//  1. o+x su tutte le directory antenate → il percorso diventa attraversabile;
+//  2. chmod -R o+rX sul sottoalbero → file leggibili e directory attraversabili.
+// I nuovi file creati dopo (es. da qBittorrent con UMask=0002) sono già o+r.
+func (m *Manager) GrantShareAccess(ctx context.Context, path string) error {
+	if !strings.HasPrefix(path, "/") || strings.ContainsAny(path, "\n\r\x00\"'`") {
+		return fmt.Errorf("percorso non valido: %s", path)
+	}
+	// Rendi attraversabili le directory antenate (fino alla radice esclusa).
+	for p := filepath.Dir(path); p != "/" && p != "." && p != ""; p = filepath.Dir(p) {
+		m.run.Run(ctx, "chmod", "o+x", p) //nolint:errcheck
+	}
+	// Rendi leggibile/attraversabile il contenuto della share.
+	if _, _, err := m.run.Run(ctx, "chmod", "-R", "o+rX", path); err != nil {
+		return fmt.Errorf("grant access %s: %w", path, err)
+	}
+	return nil
+}
+
 // ApplyNFS riscrive /etc/exports per le share NFS abilitate e ricarica.
 // La generazione del file da una sorgente strutturata evita injection.
 func (m *Manager) ApplyNFS(ctx context.Context, all []Share) error {

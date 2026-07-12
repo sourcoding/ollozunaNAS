@@ -167,3 +167,36 @@ func readFile(t *testing.T, p string) string {
 	}
 	return string(b)
 }
+
+func TestGrantShareAccess(t *testing.T) {
+	r := &recRunner{}
+	m := NewManager(r, "/tmp/exports", "/tmp/smb.conf")
+	if err := m.GrantShareAccess(context.Background(), "/srv/nas/md0/qbittorrent/downloads"); err != nil {
+		t.Fatalf("GrantShareAccess: %v", err)
+	}
+	if !r.ran("chmod -R o+rX /srv/nas/md0/qbittorrent/downloads") {
+		t.Fatal("manca il chmod ricorsivo o+rX sul contenuto della share")
+	}
+	// Le directory antenate devono diventare attraversabili (o+x).
+	for _, anc := range []string{
+		"chmod o+x /srv/nas/md0/qbittorrent",
+		"chmod o+x /srv/nas/md0",
+		"chmod o+x /srv/nas",
+		"chmod o+x /srv",
+	} {
+		if !r.ran(anc) {
+			t.Fatalf("manca traversal sull'antenato: %s", anc)
+		}
+	}
+	// Non deve toccare la radice.
+	if r.ran("chmod o+x /\n") {
+		t.Fatal("non deve fare chmod su /")
+	}
+}
+
+func TestGrantShareAccessRejectsBadPath(t *testing.T) {
+	m := NewManager(&recRunner{}, "/tmp/e", "/tmp/s")
+	if err := m.GrantShareAccess(context.Background(), "relative/path"); err == nil {
+		t.Fatal("percorso relativo dovrebbe essere rifiutato")
+	}
+}

@@ -532,6 +532,9 @@ func (h *sharesHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "apply_failed: "+err.Error())
 		return
 	}
+	// Rendi il contenuto raggiungibile/leggibile dai client della share (es. i
+	// download qBittorrent, di proprietà qbtuser:nas-media, altrimenti negati).
+	_ = h.mgr.GrantShareAccess(r.Context(), req.Path)
 	h.hub.Emit("shares.changed", map[string]string{"name": req.Name, "action": "created"})
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
 }
@@ -582,6 +585,7 @@ func (h *sharesHandlers) update(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "apply_failed: "+err.Error())
 		return
 	}
+	_ = h.mgr.GrantShareAccess(r.Context(), req.Path)
 	h.hub.Emit("shares.changed", map[string]string{"name": req.Name, "action": "updated"})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }

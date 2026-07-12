@@ -223,3 +223,21 @@ regole; i dischi dati interni SATA/NVMe vengono azzerati.
     Samba (non per-share): ora vengono conservati/riletti nella UI ma non emessi nel
     per-share include. Da valutare eventuale applicazione in [global] se richiesto.
 - Test: `shares_apply_test.go` (SMB avanzato + regole NFS da config); api round-trip.
+
+## Share su download qBittorrent: "access denied" riproducendo un video
+- **Causa**: i download di qBittorrent sono di proprietà `qbtuser:nas-media` con
+  `perms_mode=2770` (privato). L'albero (cartella `qbittorrent`, sottocartelle
+  per-torrent, file) nega ogni bit "other". Chi accede via SMB/NFS opera come
+  utente NON proprietario (o guest `nobody`), non è nel gruppo `nas-media`, quindi
+  non può attraversare le directory né leggere i file → access denied. Il
+  `chmod 0777` in `ApplySMB` toccava solo la cartella top della share (non gli
+  antenati né il contenuto annidato).
+- **Fix** (`internal/shares` `GrantShareAccess`, chiamato da create/update share):
+  1. `o+x` su tutte le directory antenate → il percorso diventa raggiungibile;
+  2. `chmod -R o+rX` sul sottoalbero → file leggibili, directory attraversabili.
+  Non distruttivo (aggiunge solo bit "other"). I file creati dopo da qBittorrent
+  sono già `o+r` grazie a `UMask=0002` nella unit. Vale per SMB e NFS.
+- **Verificato live sulla VM**: creato albero restrittivo (dir 0770, file 0660,
+  "other" negato) con un file; creata una share guest sopra → i permessi diventano
+  attraversabili/leggibili; `smbclient -N` (guest, non in nas-media) **scarica il
+  file con successo** (prima: access denied). Test: `shares_apply_test.go`.
