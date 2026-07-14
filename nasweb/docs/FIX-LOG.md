@@ -241,3 +241,35 @@ regole; i dischi dati interni SATA/NVMe vengono azzerati.
   "other" negato) con un file; creata una share guest sopra → i permessi diventano
   attraversabili/leggibili; `smbclient -N` (guest, non in nas-media) **scarica il
   file con successo** (prima: access denied). Test: `shares_apply_test.go`.
+
+## qBittorrent "access denied" su PC fisico: mount invisibile + array md127 al boot
+- **Sintomo (installazione fisica, non VM)**: dopo aver configurato qBittorrent,
+  TUTTI i download danno "access denied", sia con `perms_mode=2770` che `2775`.
+  Le cartelle `qbittorrent/{temp,torrents,downloads}` non risultano nemmeno create
+  dal punto di vista dello shell / di `qbittorrent.service`.
+- **Causa 1 — mount intrappolato nel namespace di nasd**: `nasd.service` gira in un
+  mount namespace privato (indotto da `ProtectSystem=true` + `PrivateTmp=true`) con
+  propagazione `slave` di default. Il `mount` che nasd esegue in `CreateFilesystem`/
+  `MountOnly` resta visibile SOLO a nasd; `qbittorrent.service` (namespace host) e le
+  shell vedono `/srv/nas/<vol>` vuoto. Il wizard crea le dir sul volume montato dentro
+  il namespace di nasd → qBittorrent scrive su un path che nel SUO namespace non esiste
+  → access denied.
+- **Fix 1**: `scripts/nasd.service` + `dist/lib/systemd/system/nasd.service` —
+  aggiunto `MountFlags=shared`, così i mount di nasd propagano a tutto il sistema.
+- **Causa 2 — array riassemblato come /dev/md127 al boot**: `fstabAdd` scriveva la
+  sorgente come `/dev/mdN`. Al riavvio mdadm può riassemblare l'array con nome diverso
+  (tipicamente `/dev/md127` invece di `md0`); la riga fstab su `/dev/md0` non trova il
+  device → con `nofail` il volume resta smontato → il path dei download sparisce.
+- **Fix 2**: `internal/raid/raid.go` `fstabAdd` — sorgente per `UUID=<fs>` (via
+  `blkid -s UUID`), stabile a prescindere dal nome dell'array. `fstabRemove` continua
+  a matchare per mount point, quindi resta compatibile.
+- **Verificato live sulla VM** (deploy a caldo nasd+unit): stop qbt → unmount →
+  **mount LIVE via API** (esercita MountFlags + fstab UUID) → reconfigure qbt (tutte
+  le `applyDir` OK, dir 2775 `qbtuser:nas-media`) → **qBittorrent WebUI**: torrent
+  completati tornano in *seeding* (legge i file dal volume montato live) e un torrent
+  nuovo va in `stalledDL` **senza access denied** → prova la visibilità cross-namespace.
+  Reboot reale (down→up): volume **auto-montato**, qbt *running*. `/etc/fstab` sul disco
+  ora è `UUID=… /srv/nas/md0 ext4 nofail,…`; unit con `MountFlags=shared`.
+- **NB installazione fisica esistente**: fix nel codice → vale per le NUOVE
+  installazioni/filesystem. Su un box già installato: rendere il volume montato di
+  sistema (fstab per UUID) e riavviare, oppure aggiornare nasd (binario + unit).

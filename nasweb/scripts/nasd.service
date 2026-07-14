@@ -23,6 +23,12 @@ NoNewPrivileges=false
 ProtectSystem=true
 ProtectHome=false
 PrivateTmp=true
+# nasd monta i volumi dati (mdadm/mkfs) a runtime. Con un mount namespace privato
+# (indotto da ProtectSystem/PrivateTmp) e propagazione slave di default, i mount
+# che nasd esegue resterebbero VISIBILI SOLO a nasd: qbittorrent.service e le shell
+# vedrebbero /srv/nas/<vol> vuoto → "access denied" sui download. shared propaga i
+# mount di nasd all'intero sistema.
+MountFlags=shared
 
 [Install]
 WantedBy=multi-user.target

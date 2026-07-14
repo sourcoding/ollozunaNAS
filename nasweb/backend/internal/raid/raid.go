@@ -690,10 +690,21 @@ func (m *Manager) GrowFilesystem(ctx context.Context, mdDevice, fsType string) e
 }
 
 func (m *Manager) fstabAdd(device, mountPoint, fsType string) {
+	// Sorgente per UUID del filesystem, NON per /dev/mdN: al boot mdadm può
+	// riassemblare l'array con un nome diverso da quello di creazione (tipicamente
+	// /dev/md127 invece di /dev/md0), e una riga fstab che punta a /dev/md0 non
+	// troverebbe il device → con nofail il volume resta smontato. L'UUID del
+	// filesystem è stabile a prescindere dal nome dell'array.
+	src := device
+	if out, _, err := m.run.Run(context.Background(), "blkid", "-s", "UUID", "-o", "value", device); err == nil {
+		if uuid := strings.TrimSpace(out); uuid != "" {
+			src = "UUID=" + uuid
+		}
+	}
 	// nofail + timeout breve: se l'array non è (ancora) assemblato al boot, il
 	// sistema NON deve cadere in emergency mode (local-fs.target). Senza nofail
 	// un array mancante blocca l'avvio dell'intera macchina.
-	entry := device + "\t" + mountPoint + "\t" + fsType + "\tnofail,x-systemd.device-timeout=10s\t0\t0"
+	entry := src + "\t" + mountPoint + "\t" + fsType + "\tnofail,x-systemd.device-timeout=10s\t0\t0"
 	data, err := os.ReadFile("/etc/fstab")
 	if err != nil {
 		return
