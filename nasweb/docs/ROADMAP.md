@@ -1,9 +1,11 @@
 # Roadmap
 
-Stato: **Fase 1 (MVP funzionale) completata.** Tutte le funzionalità del prompt
-sono operative end-to-end (auth, utenti, share NFS/SMB, file manager, RAID +
-S.M.A.R.T., DLNA, WebSocket, i18n IT/EN), coperte da test backend. I prossimi
-passi riguardano packaging, ISO e hardening (vedi `PIANO_PROGETTO_DISTRO_LINUX.md`).
+Stato: **Fase 1 (MVP funzionale) completata** e **ISO installabile in rilascio.**
+Tutte le funzionalità del prompt sono operative end-to-end (auth, utenti, share
+NFS/SMB, file manager, RAID + S.M.A.R.T., DLNA, app qBittorrent, WebSocket, i18n
+IT/EN), coperte da test backend. L'ISO viene costruita con `live-build` su host
+Debian e pubblicata come **release GitHub** (ultima: **v0.1.2**). I prossimi passi
+riguardano hardening e funzionalità aggiuntive (vedi `PIANO_PROGETTO_DISTRO_LINUX.md`).
 
 ## Completato
 
@@ -63,7 +65,7 @@ passi riguardano packaging, ISO e hardening (vedi `PIANO_PROGETTO_DISTRO_LINUX.m
 **Milestone M2 raggiunta**: `apt install ./nasd_*.deb` installa, abilita e avvia il
 servizio su una Debian pulita.
 
-### Fase 3 — Build distribuzione / ISO (in corso)
+### Fase 3 — Build distribuzione / ISO (completata)
 
 - ✅ **Repo APT locale firmato** (`scripts/build-apt-repo.sh`) — `apt-ftparchive`
   + `dpkg-scanpackages` producono `Packages`/`Release`; firma GPG opzionale.
@@ -75,14 +77,19 @@ servizio su una Debian pulita.
   branding (hostname/MOTD). Validato `bash -n`.
 - ✅ **Preseed installer** (`scripts/preseed.cfg`) — partiziona **solo il disco
   di sistema** (`partman-auto/disk`), i dischi dati non elencati restano intatti (AD-6).
-- ⏳ **`lb build`** (Milestone M3) — richiede host Debian con **root** + `live-build`,
-  `debootstrap`, `xorriso` (non disponibili nell'ambiente di sviluppo corrente:
-  Ubuntu WSL2 senza sudo). Da eseguire su una macchina di build dedicata.
+- ✅ **`lb build`** (Milestone M3) — ISO ibrida costruita su host Debian con
+  `live-build`/`debootstrap`/`xorriso`. Nome versionato `ollozunaOS-<X.Y.Z>.iso`
+  con auto-incremento (`ISO_VERSION`); pubblicata come release GitHub con checksum.
+- ✅ **Gestione filesystem sui volumi RAID** — `mkfs`, mount/unmount, `fstab` con
+  **mount automatico** e **`MountFlags=shared`** su `nasd` così i mount runtime sono
+  visibili a tutto il sistema; riga `fstab` per **`UUID`** (stabile anche se l'array
+  si riassembla come `md127`). Copre create/mount/grow/wipe in `internal/raid`.
+- ✅ **App qBittorrent** (`internal/qbt`) — wizard 6-step con file browser ristretto
+  ai volumi, utente di servizio `qbtuser:nas-media`, permessi `2770/2775` + ACL,
+  unit systemd gestita, WebUI. Fix "access denied" sui download (v0.1.2).
 
 ## Priorità media
 
-5. **Gestione filesystem sui volumi RAID**: `mkfs`, mount, fstab, mount automatico
-   (estendere `raid` o nuovo package `storage`).
 6. **Quote utente/gruppo** (setquota/repquota) nel modulo users.
 7. **Polling/parse `/proc/mdstat`** per `sync_pct` reale durante il rebuild,
    con push periodico via `hub.Emit("raid.status", …)`.

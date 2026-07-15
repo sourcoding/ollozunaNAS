@@ -22,7 +22,7 @@ ollozunaNAS ships as an installable Debian-based ISO. It boots, installs itself,
 
 ## Download
 
-Grab the latest installer ISO from the **[Releases page](https://github.com/sourcoding/ollozunaNAS/releases/latest)** (`ollozunaOS-<version>.iso`).
+Grab the latest installer ISO from the **[Releases page](https://github.com/sourcoding/ollozunaNAS/releases/latest)** (`ollozunaOS-<version>.iso`). See [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ---
 
